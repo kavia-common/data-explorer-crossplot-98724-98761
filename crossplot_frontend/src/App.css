@@ -253,3 +253,25 @@ svg.plot {
 .btn-primary:hover {
   background: #1592a8;
 }
+
+/* Data Source panel (moved to bottom) */
+.data-source-panel {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 20px 20px;
+  width: 100%;
+}
+.data-source-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+
+/* Rows counter below Detected Variables */
+.rows-counter {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}

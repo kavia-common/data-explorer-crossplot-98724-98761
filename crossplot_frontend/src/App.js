@@ -4,7 +4,7 @@ import Header from './components/Header';
 import VariableSelector from './components/VariableSelector';
 import ScatterPlot from './components/ScatterPlot';
 import TokenGate from './components/TokenGate';
-import { fetchTableData, buildApiUrl } from './services/api';
+import { fetchTableData } from './services/api';
 import { inferVariableTypes, normalizeTable } from './utils/data';
 
 /**
@@ -33,33 +33,11 @@ export default function App() {
   const [cVar, setCVar] = useState('');
 
   /** Helpers for display */
-  const endpointUrl = useMemo(() => {
-    try {
-      if (!token) return '';
-      return buildApiUrl(token);
-    } catch {
-      return '';
-    }
-  }, [token]);
-
   function maskToken(t) {
     if (!t) return '';
     const s = String(t);
     if (s.length <= 4) return '••••';
     return '••••' + s.slice(-4);
-  }
-
-  function maskTokenInUrl(urlStr) {
-    try {
-      const u = new URL(urlStr);
-      if (u.searchParams.has('token')) {
-        const t = u.searchParams.get('token') || '';
-        u.searchParams.set('token', maskToken(t));
-      }
-      return u.toString();
-    } catch {
-      return urlStr;
-    }
   }
 
   // Fetch data only when token is present
@@ -145,33 +123,7 @@ export default function App() {
       <Header title="Crossplot Explorer" subtitle="Explore relationships using a color-coded scatterplot" />
       <div className="app-layout">
         <aside className="sidebar">
-          <div className="sidebar-section">
-            <h3 className="section-title">Data Source</h3>
-
-            <div className="info-card">
-              <div className="label">API Endpoint</div>
-              <div className="value" title={endpointUrl || '(Token not set)'}>
-                {endpointUrl ? maskTokenInUrl(endpointUrl) : '(Token not set)'}
-              </div>
-            </div>
-
-            <div className="info-card">
-              <div className="label">Token</div>
-              <div className="value">{token ? maskToken(token) : '(none)'}</div>
-            </div>
-
-            {loading && <div className="loading">Loading dataset…</div>}
-            {!loading && error && <div className="error">{error}</div>}
-            {!loading && !error && rows.length > 0 && (
-              <div className="info-card">
-                <div className="label">Rows</div>
-                <div className="value">{rows.length.toLocaleString()}</div>
-              </div>
-            )}
-          </div>
-
-          <TokenGate token={token} onSave={handleSaveToken} onClear={handleClearToken} />
-
+          {/* Detected variables moved to the top */}
           <div className="sidebar-section">
             <h3 className="section-title">Detected Variables</h3>
             <div className="detected-list">
@@ -188,8 +140,15 @@ export default function App() {
                 <span>Date</span>
               </div>
             </div>
+            {/* Row count displayed here, just under Detected Variables */}
+            {!loading && !error && rows.length > 0 && (
+              <div className="rows-counter">
+                {rows.length.toLocaleString()} rows loaded
+              </div>
+            )}
           </div>
 
+          {/* Variable selector next, as requested */}
           <VariableSelector
             numericOptions={numericVars}
             categoricalOptions={categoricalVars}
@@ -240,6 +199,26 @@ export default function App() {
           )}
         </main>
       </div>
+
+      {/* DATA SOURCE moved to the bottom, below the visualization */}
+      <section className="data-source-panel" aria-label="Data Source">
+        <div className="data-source-card">
+          <h3 className="section-title">Data Source</h3>
+
+          {/* API Endpoint removed per instructions */}
+
+          <div className="info-card">
+            <div className="label">Token</div>
+            <div className="value">{token ? maskToken(token) : '(none)'}</div>
+          </div>
+
+          {loading && <div className="loading">Loading dataset…</div>}
+          {!loading && error && <div className="error">{error}</div>}
+
+          <TokenGate token={token} onSave={handleSaveToken} onClear={handleClearToken} />
+        </div>
+      </section>
+
       <footer className="footer">
         <span>Powered by React • Modern Light Theme</span>
       </footer>
