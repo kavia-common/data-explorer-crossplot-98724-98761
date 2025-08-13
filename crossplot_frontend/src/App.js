@@ -3,16 +3,20 @@ import './App.css';
 import Header from './components/Header';
 import VariableSelector from './components/VariableSelector';
 import ScatterPlot from './components/ScatterPlot';
-import { fetchTableData } from './services/api';
+import TokenGate from './components/TokenGate';
+import { fetchTableData, buildApiUrl } from './services/api';
 import { inferVariableTypes, normalizeTable } from './utils/data';
 
 /**
- * App shell that composes the layout, handles data fetching, variable type detection,
- * and coordinates state for the scatter plot visualization.
+ * App shell that composes the layout, handles token gating, data fetching,
+ * variable type detection, and coordinates state for the scatter plot visualization.
  */
 
 // PUBLIC_INTERFACE
 export default function App() {
+  /** Token handling: state + localStorage */
+  const [token, setToken] = useState(() => localStorage.getItem('apiToken') || '');
+
   /** State: loading/error/data */
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -28,30 +32,59 @@ export default function App() {
   const [yVar, setYVar] = useState('');
   const [cVar, setCVar] = useState('');
 
-  const apiUrl = process.env.REACT_APP_API_URL;
+  /** Helpers for display */
+  const endpointUrl = useMemo(() => {
+    try {
+      if (!token) return '';
+      return buildApiUrl(token);
+    } catch {
+      return '';
+    }
+  }, [token]);
 
-  // Fetch data on mount if API URL is provided
+  function maskToken(t) {
+    if (!t) return '';
+    const s = String(t);
+    if (s.length <= 4) return '••••';
+    return '••••' + s.slice(-4);
+  }
+
+  function maskTokenInUrl(urlStr) {
+    try {
+      const u = new URL(urlStr);
+      if (u.searchParams.has('token')) {
+        const t = u.searchParams.get('token') || '';
+        u.searchParams.set('token', maskToken(t));
+      }
+      return u.toString();
+    } catch {
+      return urlStr;
+    }
+  }
+
+  // Fetch data only when token is present
   useEffect(() => {
     let isMounted = true;
     const controller = new AbortController();
 
     async function load() {
-      if (!apiUrl) {
-        setError('Environment variable REACT_APP_API_URL is not set. Please configure it in a .env file.');
+      // If no token, clear state and skip fetch
+      if (!token) {
+        setRows([]);
+        setError('');
         return;
       }
+
       setLoading(true);
       setError('');
       try {
-        const data = await fetchTableData({ signal: controller.signal });
+        const data = await fetchTableData(token, { signal: controller.signal });
         const normalized = normalizeTable(data);
 
         if (!Array.isArray(normalized) || normalized.length === 0) {
           throw new Error('The API response did not contain a non-empty array of row objects.');
         }
-        // Ensure objects
         const objectRows = normalized.filter((r) => r && typeof r === 'object' && !Array.isArray(r));
-
         if (!objectRows.length) {
           throw new Error('The API response rows are not objects with key-value pairs.');
         }
@@ -87,12 +120,25 @@ export default function App() {
       isMounted = false;
       controller.abort();
     };
-  }, [apiUrl]);
+  }, [token]);
 
   // Derived flags
   const hasEnoughVars = useMemo(() => {
     return numericVars.length >= 2 && categoricalVars.length >= 1;
   }, [numericVars, categoricalVars]);
+
+  // Token handlers
+  const handleSaveToken = (newToken) => {
+    localStorage.setItem('apiToken', newToken);
+    setToken(newToken);
+  };
+
+  const handleClearToken = () => {
+    localStorage.removeItem('apiToken');
+    setToken('');
+    setRows([]);
+    setError('');
+  };
 
   return (
     <div className="app-root">
@@ -101,10 +147,19 @@ export default function App() {
         <aside className="sidebar">
           <div className="sidebar-section">
             <h3 className="section-title">Data Source</h3>
+
             <div className="info-card">
-              <div className="label">API URL</div>
-              <div className="value" title={apiUrl || '(Not configured)'}>{apiUrl || '(Not configured)'}</div>
+              <div className="label">API Endpoint</div>
+              <div className="value" title={endpointUrl || '(Token not set)'}>
+                {endpointUrl ? maskTokenInUrl(endpointUrl) : '(Token not set)'}
+              </div>
             </div>
+
+            <div className="info-card">
+              <div className="label">Token</div>
+              <div className="value">{token ? maskToken(token) : '(none)'}</div>
+            </div>
+
             {loading && <div className="loading">Loading dataset…</div>}
             {!loading && error && <div className="error">{error}</div>}
             {!loading && !error && rows.length > 0 && (
@@ -114,6 +169,8 @@ export default function App() {
               </div>
             )}
           </div>
+
+          <TokenGate token={token} onSave={handleSaveToken} onClear={handleClearToken} />
 
           <div className="sidebar-section">
             <h3 className="section-title">Detected Variables</h3>
@@ -153,7 +210,11 @@ export default function App() {
         </aside>
 
         <main className="main-content">
-          {!loading && !error && rows.length > 0 && hasEnoughVars && xVar && yVar && cVar ? (
+          {!token ? (
+            <div className="placeholder">
+              Please enter your access token to load the dataset.
+            </div>
+          ) : !loading && !error && rows.length > 0 && hasEnoughVars && xVar && yVar && cVar ? (
             <div className="viz-card">
               <div className="viz-header">
                 <div className="viz-title">
