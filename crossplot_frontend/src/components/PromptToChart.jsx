@@ -40,14 +40,15 @@ export default function PromptToChart({
   const [endpoint, setEndpoint] = useState(null);
 
   useEffect(() => {
-    // Read effective auth info (ENV has precedence over local)
+    // Read effective auth info (local overrides env)
     try {
       const auth = getAiAuthInfo();
       setKey(auth?.key || '');
       setAiKeySource(auth?.source || 'none');
     } catch {
       setKey(getAiApiKey() || '');
-      setAiKeySource('local');
+      // getAiApiKey already prefers local then env
+      setAiKeySource((getAiApiKey() || '').trim() ? 'local' : 'none');
     }
     // Capture current AI endpoint info for debugging if needed
     try {
@@ -146,19 +147,16 @@ export default function PromptToChart({
   }
 
   function handleSaveKey() {
-    setAiApiKey(aiKey);
+    const trimmed = (aiKey || '').trim();
+    if (!trimmed) return;
+    setAiApiKey(trimmed);
+    setKey(trimmed);
+    setAiKeySource('local'); // local override has priority over .env
+    setShowKeyInput(false);
     setStatus({
       type: 'success',
-      message: 'Clave de IA guardada localmente (navegador).'
+      message: 'Clave de IA guardada localmente (tendrá prioridad sobre .env).'
     });
-    // After saving locally, source becomes 'local' unless env is set and takes precedence
-    const envKey = getEnvAiApiKey();
-    if (envKey && envKey.trim()) {
-      setAiKeySource('env'); // env still takes precedence
-      setKey(envKey.trim());
-    } else {
-      setAiKeySource('local');
-    }
   }
 
   function handleClearLocalKey() {
@@ -169,20 +167,32 @@ export default function PromptToChart({
     setKey(useEnv ? envKey.trim() : '');
     setAiKeySource(useEnv ? 'env' : 'none');
     setStatus({ type: 'success', message: useEnv ? 'Clave local eliminada. Usando clave de entorno.' : 'Clave local eliminada.' });
+    setShowKeyInput(false);
+  }
+
+  function startOverrideWithLocal() {
+    // Allow user to set a local key even if ENV exists
+    setShowKeyInput(true);
+    setKey(''); // start with empty input, user pastes their own key
+  }
+
+  function startChangeLocalKey() {
+    setShowKeyInput(true);
+    setKey(''); // ask for a new key; we don't reveal the existing one
   }
 
   return (
     <div className="selector ai-card" aria-label="Prompt con IA">
       <h3 className="section-title">Prompt a Gráfica (IA)</h3>
 
-      {/* AI key status */}
+      {/* AI key status and controls */}
       {!hasAI ? (
         <div className="ai-warning" role="note">
           Para mejores resultados, agrega una clave de API de IA (OpenAI compatible).
           El sistema hará un intento heurístico si no hay clave.
           <div className="ai-key-row">
             {!showKeyInput ? (
-              <button type="button" className="btn" onClick={() => setShowKeyInput(true)}>
+              <button type="button" className="btn" onClick={() => { setShowKeyInput(true); setKey(''); }}>
                 Configurar clave de IA
               </button>
             ) : (
@@ -206,8 +216,33 @@ export default function PromptToChart({
           IA habilitada. Fuente clave: <strong>{aiKeySource}</strong>{aiKey ? ` (${maskKey(aiKey)})` : ''}.
           {aiKeySource === 'local' ? (
             <div className="ai-key-row">
+              <button type="button" className="btn" onClick={startChangeLocalKey}>
+                Cambiar clave
+              </button>
               <button type="button" className="btn" onClick={handleClearLocalKey}>
                 Quitar clave local (usar .env si existe)
+              </button>
+            </div>
+          ) : (
+            <div className="ai-key-row">
+              <button type="button" className="btn" onClick={startOverrideWithLocal}>
+                Usar clave personal (override .env)
+              </button>
+            </div>
+          )}
+
+          {/* Inline input to override or change when requested */}
+          {showKeyInput ? (
+            <div className="ai-key-row" style={{ marginTop: 8 }}>
+              <input
+                type="password"
+                className="text-input"
+                placeholder="Pega tu clave de OpenAI (sk-...)"
+                value={aiKey}
+                onChange={(e) => setKey(e.target.value)}
+              />
+              <button type="button" className="btn btn-primary" onClick={handleSaveKey} disabled={!aiKey.trim()}>
+                Guardar clave
               </button>
             </div>
           ) : null}
@@ -229,8 +264,13 @@ export default function PromptToChart({
               </ul>
               {String(llmNotice).toLowerCase().includes('401') || String(llmNotice).toLowerCase().includes('no autorizada') ? (
                 <div style={{ marginTop: 6 }}>
-                  Sugerencia: si ya configuraste una nueva clave en .env y ves este error,
-                  {aiKeySource === 'local' ? ' elimina la clave local para usar la del entorno.' : ' asegúrate de que la variable de entorno esté bien definida y el build haya tomado los cambios.'}
+                  Sugerencia: si estás usando una clave local y ves este error,
+                  elimina la clave local para usar la del entorno, o coloca una clave válida.
+                </div>
+              ) : null}
+              {String(llmNotice).toLowerCase().includes('404') ? (
+                <div style={{ marginTop: 6 }}>
+                  Sugerencia: revisa que el endpoint sea correcto y accesible. Un 404 indica ruta no encontrada.
                 </div>
               ) : null}
             </div>

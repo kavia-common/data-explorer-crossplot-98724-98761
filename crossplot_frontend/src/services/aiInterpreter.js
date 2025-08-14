@@ -418,17 +418,17 @@ async function callOpenAI(prompt, variables, apiKey, model) {
 /**
  * PUBLIC_INTERFACE
  * Return the effective API key and its source ('env', 'local', or 'none').
- * Environment variables take precedence over local storage.
+ * Local storage takes precedence over environment variables (user override).
  */
 export function getAiAuthInfo() {
   const envKey = getEnvAiApiKey();
   const localKey = getLocalAiApiKey();
-  
-  if (envKey && envKey.trim()) {
-    return { key: envKey.trim(), source: 'env' };
-  }
+
   if (localKey && localKey.trim()) {
     return { key: localKey.trim(), source: 'local' };
+  }
+  if (envKey && envKey.trim()) {
+    return { key: envKey.trim(), source: 'env' };
   }
   return { key: '', source: 'none' };
 }
@@ -532,7 +532,7 @@ function detectChartIntent(prompt) {
 /**
  * PUBLIC_INTERFACE
  * Interpret a user's prompt into chart instructions with resilient OpenAI handling.
- * Uses ENV key first, then localStorage. If local key fails with 401/unauthorized and an ENV key exists,
+ * Uses the localStorage key first (user override). If that fails with 401/unauthorized and an ENV key exists,
  * it retries automatically with the ENV key before falling back to heuristic interpretation.
  */
 export async function interpretPrompt({ prompt, variables, options = {} }) {
