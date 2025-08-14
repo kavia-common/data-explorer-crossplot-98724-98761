@@ -4,6 +4,7 @@ import Header from './components/Header';
 import VariableSelector from './components/VariableSelector';
 import ScatterPlot from './components/ScatterPlot';
 import TokenGate from './components/TokenGate';
+import PromptToChart from './components/PromptToChart';
 import { fetchTableData } from './services/api';
 import { inferVariableTypes, normalizeTable } from './utils/data';
 
@@ -147,6 +148,19 @@ export default function App() {
               </div>
             )}
           </div>
+
+          {/* PromptToChart added above the manual selector */}
+          <PromptToChart
+            numericOptions={numericVars}
+            categoricalOptions={categoricalVars}
+            dateOptions={dateVars}
+            onApply={({ x, y, color }) => {
+              if (x && numericVars.includes(x)) setXVar(x);
+              if (y && numericVars.includes(y)) setYVar(y);
+              if (color && categoricalVars.includes(color)) setCVar(color);
+            }}
+            disabled={!rows.length || !hasEnoughVars}
+          />
 
           {/* Variable selector next, as requested */}
           <VariableSelector

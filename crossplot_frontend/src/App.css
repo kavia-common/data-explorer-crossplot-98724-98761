@@ -275,3 +275,54 @@ svg.plot {
   font-size: 13px;
   color: var(--muted);
 }
+
+/* AI Prompt styles */
+.ai-card { }
+.text-area {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: white;
+  color: var(--text);
+  outline: none;
+  resize: vertical;
+  min-height: 80px;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.text-area:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--ring);
+}
+.ai-warning {
+  background: #fffaf0;
+  border: 1px dashed #f0d38c;
+  color: #7c5b1a;
+  padding: 10px 12px;
+  border-radius: 10px;
+  margin-bottom: 8px;
+}
+.ai-ok {
+  background: #f0fff4;
+  border: 1px solid #9ae6b4;
+  color: #22543d;
+  padding: 8px 10px;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+.ai-key-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.ai-vars {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.ai-vars-row { display: flex; gap: 6px; align-items: baseline; }
+.ai-vars-label { font-weight: 600; color: #475569; }
+.ai-vars-list { color: #334155; }
+.success { color: #166534; font-weight: 600; }
