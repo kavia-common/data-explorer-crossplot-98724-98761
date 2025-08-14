@@ -25,10 +25,32 @@
  *   }
  */
 
-const OPENAI_BASE_URL = process.env.REACT_APP_OPENAI_BASE_URL || 'https://api.openai.com';
-const OPENAI_CHAT_PATH = process.env.REACT_APP_OPENAI_CHAT_PATH || '/v1/chat/completions';
-const OPENAI_URL = `${OPENAI_BASE_URL.replace(/\/$/, '')}${OPENAI_CHAT_PATH.startsWith('/') ? '' : '/'}${OPENAI_CHAT_PATH}`;
-const DEFAULT_MODEL = process.env.REACT_APP_OPENAI_MODEL || 'gpt-4o-mini';
+/**
+ * Resolve OpenAI-compatible configuration from multiple env aliases.
+ * Supports the envs listed in container_env and common variants.
+ */
+const ENV = process.env || {};
+// Base URL: check multiple aliases, fallback to official
+const OPENAI_BASE_URL =
+  ENV.REACT_APP_OPENAI_BASE_URL ||
+  ENV.REACT_APP_AI_BASE ||
+  ENV.REACT_APP_REACT_APP_AI_BASE ||
+  'https://api.openai.com';
+
+// Chat path: allow override, fallback to standard
+const OPENAI_CHAT_PATH =
+  ENV.REACT_APP_OPENAI_CHAT_PATH ||
+  '/v1/chat/completions';
+
+// Full URL composed safely with/without slashes
+const OPENAI_URL = `${String(OPENAI_BASE_URL).replace(/\/$/, '')}${String(OPENAI_CHAT_PATH).startsWith('/') ? '' : '/'}${OPENAI_CHAT_PATH}`;
+
+// Model: check multiple aliases
+const DEFAULT_MODEL =
+  ENV.REACT_APP_OPENAI_MODEL ||
+  ENV.REACT_APP_AI_MODEL ||
+  ENV.REACT_APP_REACT_APP_AI_MODEL ||
+  'gpt-4o-mini';
 
 /**
  * Build a system prompt to instruct the model to output compact JSON instructions:
@@ -196,7 +218,16 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
  */
 function classifyOpenAIError(status, errText) {
   const text = String(errText || '').toLowerCase();
-  if (status === 401 || text.includes('invalid api key') || text.includes('incorrect api key')) {
+  const looksLikeAuth =
+    text.includes('invalid api key') ||
+    text.includes('incorrect api key') ||
+    text.includes("you didn't provide an api key") ||
+    text.includes('you did not provide an api key') ||
+    text.includes('missing api key') ||
+    text.includes('no api key') ||
+    text.includes('bearer') && text.includes('unauthorized');
+
+  if (status === 401 || looksLikeAuth) {
     return 'API key inválida o no autorizada (401).';
   }
   if (status === 404) {
@@ -329,13 +360,19 @@ export function getAiApiKey() {
   try {
     return (
       (typeof localStorage !== 'undefined' && localStorage.getItem('aiApiKey')) ||
-      process.env.REACT_APP_OPENAI_API_KEY ||
-      process.env.REACT_APP_AI_API_KEY ||
+      ENV.REACT_APP_OPENAI_API_KEY ||
+      ENV.REACT_APP_REACT_APP_OPENAI_API_KEY || // alias sometimes injected by pipelines
+      ENV.REACT_APP_AI_API_KEY ||
       ''
     );
   } catch {
     // In some environments accessing localStorage can throw; ignore and fallback to env only.
-    return process.env.REACT_APP_OPENAI_API_KEY || process.env.REACT_APP_AI_API_KEY || '';
+    return (
+      ENV.REACT_APP_OPENAI_API_KEY ||
+      ENV.REACT_APP_REACT_APP_OPENAI_API_KEY ||
+      ENV.REACT_APP_AI_API_KEY ||
+      ''
+    );
   }
 }
 

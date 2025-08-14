@@ -27,6 +27,8 @@ export default function PromptToChart({
   const [status, setStatus] = useState({ type: 'idle', message: '' });
   const [aiKey, setKey] = useState('');
   const [showKeyInput, setShowKeyInput] = useState(false);
+  // If LLM attempt fails with an auth error (e.g., 401), we surface a warning banner for the user.
+  const [llmNotice, setLlmNotice] = useState('');
 
   useEffect(() => {
     setKey(getAiApiKey() || '');
@@ -63,6 +65,10 @@ export default function PromptToChart({
         date: dateOptions
       };
       const res = await interpretPrompt({ prompt, variables, options: { preferLLM: true } });
+
+      // If LLM was attempted but not used due to an error (e.g., 401), show a visible warning.
+      const llmAuthIssue = res?.attemptedLLM && res?.source !== 'openai' && res?.llmError;
+      setLlmNotice(llmAuthIssue ? String(res.llmError) : '');
 
       // 1) Unsupported chart type handling
       if (res?.unsupported || (res?.chart && res.chart !== 'scatter')) {
@@ -153,6 +159,13 @@ export default function PromptToChart({
           IA habilitada con clave en este navegador.
         </div>
       )}
+
+      {/* LLM Authorization warning (e.g., invalid API key) */}
+      {llmNotice ? (
+        <div className="ai-warning" role="alert">
+          Error de autorización de IA: {llmNotice}
+        </div>
+      ) : null}
 
       {/* Variables available */}
       <div className="ai-vars">
