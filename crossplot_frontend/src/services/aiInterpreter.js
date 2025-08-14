@@ -1,17 +1,33 @@
 //
+//
 // AI Interpreter service
 // Translates a natural language prompt into chart instructions (x, y, color)
 // using an LLM (OpenAI) if an API key is available; otherwise, falls back to a
 // lightweight heuristic parser using available variable names.
 //
+// Improvements in this version:
+// - Explicit attempt to call OpenAI when an API key is present.
+// - Configurable base URL and path (REACT_APP_OPENAI_BASE_URL, REACT_APP_OPENAI_CHAT_PATH).
+// - Timeout and robust error classification.
+// - Automatic retry without JSON mode if the model does not support response_format.
+// - Clear "attemptedLLM" and "llmError" fields in the result for UI transparency.
+//
 
 /**
  * Types:
  * - VariablesContext = { numeric: string[], categorical: string[], date?: string[] }
- * - InterpretResult = { x?: string, y?: string, color?: string, chart?: string, source: 'openai'|'heuristic', explanation?: string }
+ * - InterpretResult = {
+ *     x?: string, y?: string, color?: string, chart?: string,
+ *     source: 'openai'|'heuristic'|'validator',
+ *     explanation?: string,
+ *     attemptedLLM?: boolean,
+ *     llmError?: string
+ *   }
  */
 
-const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
+const OPENAI_BASE_URL = process.env.REACT_APP_OPENAI_BASE_URL || 'https://api.openai.com';
+const OPENAI_CHAT_PATH = process.env.REACT_APP_OPENAI_CHAT_PATH || '/v1/chat/completions';
+const OPENAI_URL = `${OPENAI_BASE_URL.replace(/\/$/, '')}${OPENAI_CHAT_PATH.startsWith('/') ? '' : '/'}${OPENAI_CHAT_PATH}`;
 const DEFAULT_MODEL = process.env.REACT_APP_OPENAI_MODEL || 'gpt-4o-mini';
 
 /**
@@ -130,7 +146,7 @@ function heuristicInterpretation(prompt, variables) {
   const onY = text.match(/en\s+el\s+eje\s+y\s+([a-zA-Z0-9_]+)/i) || text.match(/on\s+y\s+axis\s+([a-zA-Z0-9_]+)/i);
   if (onY && onY[1] && numericsLower.includes(onY[1].toLowerCase())) y = findExact(onY[1], numeric, numericsLower);
 
-  // Try "color by X" or "colorear por X" or "color por X" or "según X"
+  // Try "color by X" or "colorear por X" or "color por X" or "según X" or "por X"
   const colorBy = text.match(/color(?:ed)?\s+by\s+([a-zA-Z0-9_]+)/i)
                || text.match(/colorear\s+por\s+([a-zA-Z0-9_]+)/i)
                || text.match(/color\s+por\s+([a-zA-Z0-9_]+)/i)
@@ -162,12 +178,53 @@ function heuristicInterpretation(prompt, variables) {
 }
 
 /**
+ * Fetch helper with timeout using AbortController.
+ */
+async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal, mode: 'cors' });
+    return res;
+  } finally {
+    clearTimeout(id);
+  }
+}
+
+/**
+ * Classify OpenAI error text into a shorter, user-friendly reason.
+ */
+function classifyOpenAIError(status, errText) {
+  const text = String(errText || '').toLowerCase();
+  if (status === 401 || text.includes('invalid api key') || text.includes('incorrect api key')) {
+    return 'API key inválida o no autorizada (401).';
+  }
+  if (status === 404) {
+    return 'Endpoint de OpenAI no encontrado (404).';
+  }
+  if (status === 429 || text.includes('rate limit')) {
+    return 'Límite de uso de la API excedido (429).';
+  }
+  if (status === 400 && (text.includes('response_format') || text.includes('json') || text.includes('not supported'))) {
+    return 'El modelo no soporta JSON mode; reintentando sin JSON mode.';
+  }
+  if (text.includes('cors') || text.includes('failed to fetch') || text.includes('network')) {
+    return 'Error de red/CORS al contactar OpenAI.';
+  }
+  return `OpenAI error ${status}: ${errText || 'desconocido'}`;
+}
+
+/**
  * Call OpenAI Chat Completions with a constrained instruction.
+ * Tries JSON mode first; if unsupported, retries without response_format.
  */
 async function callOpenAI(prompt, variables, apiKey, model) {
   const sys = buildSystemPrompt(variables);
-  const payload = {
-    model: model || DEFAULT_MODEL,
+  const modelToUse = model || DEFAULT_MODEL;
+
+  // First attempt: JSON mode
+  const payloadJsonMode = {
+    model: modelToUse,
     messages: [
       { role: 'system', content: sys },
       { role: 'user', content: String(prompt || '').trim() }
@@ -176,36 +233,92 @@ async function callOpenAI(prompt, variables, apiKey, model) {
     response_format: { type: 'json_object' }
   };
 
-  const res = await fetch(OPENAI_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    body: JSON.stringify(payload)
-  });
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    throw new Error(`OpenAI error ${res.status}: ${errText || res.statusText}`);
-  }
-
-  const data = await res.json();
-  const content = data?.choices?.[0]?.message?.content || '';
-  const parsed = safeParseJson(content);
-  if (!parsed || typeof parsed !== 'object') {
-    throw new Error('Failed to parse model response as JSON.');
-  }
-
-  // Normalize keys
-  return {
-    x: parsed.x,
-    y: parsed.y,
-    color: parsed.color,
-    chart: parsed.chart || 'scatter',
-    source: 'openai',
-    explanation: 'Interpreted by OpenAI based on provided variable context.'
+  const baseHeaders = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${apiKey}`
   };
+
+  let res;
+  try {
+    res = await fetchWithTimeout(OPENAI_URL, {
+      method: 'POST',
+      headers: baseHeaders,
+      body: JSON.stringify(payloadJsonMode)
+    });
+  } catch (e) {
+    // network/timeout/CORS
+    throw new Error('Error de red o CORS al contactar OpenAI.');
+  }
+
+  // If OK -> parse and return
+  if (res.ok) {
+    const data = await res.json();
+    const content = data?.choices?.[0]?.message?.content || '';
+    const parsed = safeParseJson(content);
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error('No se pudo parsear la respuesta del modelo como JSON.');
+    }
+    return {
+      x: parsed.x,
+      y: parsed.y,
+      color: parsed.color,
+      chart: parsed.chart || 'scatter',
+      source: 'openai',
+      explanation: 'Interpreted by OpenAI based on provided variable context.',
+      attemptedLLM: true
+    };
+  }
+
+  // If not OK, inspect text
+  const errText = await res.text().catch(() => '');
+  const classified = classifyOpenAIError(res.status, errText);
+
+  // Retry logic: model may not support JSON mode -> try without response_format
+  if (res.status === 400 && classified.includes('no soporta JSON mode')) {
+    const payloadNoJsonMode = {
+      model: modelToUse,
+      messages: [
+        { role: 'system', content: sys },
+        { role: 'user', content: String(prompt || '').trim() }
+      ],
+      temperature: 0.0
+    };
+
+    let res2;
+    try {
+      res2 = await fetchWithTimeout(OPENAI_URL, {
+        method: 'POST',
+        headers: baseHeaders,
+        body: JSON.stringify(payloadNoJsonMode)
+      });
+    } catch (e) {
+      throw new Error('Error de red o CORS al contactar OpenAI (reintento sin JSON mode).');
+    }
+
+    if (!res2.ok) {
+      const errText2 = await res2.text().catch(() => '');
+      throw new Error(classifyOpenAIError(res2.status, errText2));
+    }
+
+    const data2 = await res2.json();
+    const content2 = data2?.choices?.[0]?.message?.content || '';
+    const parsed2 = safeParseJson(content2);
+    if (!parsed2 || typeof parsed2 !== 'object') {
+      throw new Error('No se pudo parsear la respuesta del modelo como JSON (sin JSON mode).');
+    }
+    return {
+      x: parsed2.x,
+      y: parsed2.y,
+      color: parsed2.color,
+      chart: parsed2.chart || 'scatter',
+      source: 'openai',
+      explanation: 'Interpreted by OpenAI (sin JSON mode) based on provided variable context.',
+      attemptedLLM: true
+    };
+  }
+
+  // Other errors -> propagate as Error for the caller to fallback
+  throw new Error(classified);
 }
 
 /**
@@ -213,12 +326,17 @@ async function callOpenAI(prompt, variables, apiKey, model) {
  */
 // PUBLIC_INTERFACE
 export function getAiApiKey() {
-  return (
-    (typeof localStorage !== 'undefined' && localStorage.getItem('aiApiKey')) ||
-    process.env.REACT_APP_OPENAI_API_KEY ||
-    process.env.REACT_APP_AI_API_KEY ||
-    ''
-  );
+  try {
+    return (
+      (typeof localStorage !== 'undefined' && localStorage.getItem('aiApiKey')) ||
+      process.env.REACT_APP_OPENAI_API_KEY ||
+      process.env.REACT_APP_AI_API_KEY ||
+      ''
+    );
+  } catch {
+    // In some environments accessing localStorage can throw; ignore and fallback to env only.
+    return process.env.REACT_APP_OPENAI_API_KEY || process.env.REACT_APP_AI_API_KEY || '';
+  }
 }
 
 /**
@@ -227,10 +345,14 @@ export function getAiApiKey() {
 // PUBLIC_INTERFACE
 export function setAiApiKey(key) {
   if (typeof localStorage === 'undefined') return;
-  if (key && key.trim()) {
-    localStorage.setItem('aiApiKey', key.trim());
-  } else {
-    localStorage.removeItem('aiApiKey');
+  try {
+    if (key && key.trim()) {
+      localStorage.setItem('aiApiKey', key.trim());
+    } else {
+      localStorage.removeItem('aiApiKey');
+    }
+  } catch {
+    // ignore storage failure
   }
 }
 
@@ -285,20 +407,26 @@ export async function interpretPrompt({ prompt, variables, options = {} }) {
       error: `Este tipo de gráfico no está soportado: ${intent}.`,
       suggestion:
         'Actualmente solo se soportan crossplots (scatterplots). Sugerencia: "Grafica X vs Y, coloreado por Categórica".',
+      attemptedLLM: false
     };
   }
 
   if (preferLLM && apiKey) {
     try {
-      return await callOpenAI(prompt, variables, apiKey, options.model);
+      const r = await callOpenAI(prompt, variables, apiKey, options.model);
+      return r;
     } catch (e) {
-      // Fall back to heuristic with the error note in explanation
+      // Fall back to heuristic with the error noted
       const h = heuristicInterpretation(prompt, variables);
       h.explanation = `LLM failed (${e?.message || 'unknown'}). Fallback to heuristic.`;
+      h.attemptedLLM = true;
+      h.llmError = e?.message || 'unknown';
       return h;
     }
   }
 
-  // No API key, deterministic heuristic
-  return heuristicInterpretation(prompt, variables);
+  // No API key or LLM not preferred -> deterministic heuristic
+  const h = heuristicInterpretation(prompt, variables);
+  h.attemptedLLM = false;
+  return h;
 }

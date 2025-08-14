@@ -86,9 +86,12 @@ export default function PromptToChart({
 
       if (validX && validY && validC) {
         onApply && onApply({ x: res.x, y: res.y, color: res.color });
+        const suffix = res.source === 'openai' ? '(IA)' : '(heurístico)';
+        const llmNote = (res.source !== 'openai' && res?.attemptedLLM && res?.llmError)
+          ? ` (fallo IA: ${res.llmError})` : '';
         setStatus({
           type: 'success',
-          message: `Listo: x=${res.x}, y=${res.y}, color=${res.color} ${res.source === 'openai' ? '(IA)' : '(heurístico)'}`
+          message: `Listo: x=${res.x}, y=${res.y}, color=${res.color} ${suffix}${llmNote}`
         });
       } else {
         const missing = [
