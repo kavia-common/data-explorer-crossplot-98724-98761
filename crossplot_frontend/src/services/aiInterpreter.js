@@ -43,7 +43,31 @@ const OPENAI_CHAT_PATH =
   '/v1/chat/completions';
 
 // Full URL composed safely with/without slashes
-const OPENAI_URL = `${String(OPENAI_BASE_URL).replace(/\/$/, '')}${String(OPENAI_CHAT_PATH).startsWith('/') ? '' : '/'}${OPENAI_CHAT_PATH}`;
+/**
+ * Compose the effective URL safely, avoiding common pitfalls:
+ * - If base already ends with "/v1" and path starts with "/v1/...", strip the duplicate.
+ */
+const _BASE = String(OPENAI_BASE_URL).replace(/\/+$/, '');
+const _PATH_RAW = String(OPENAI_CHAT_PATH).startsWith('/') ? String(OPENAI_CHAT_PATH) : `/${String(OPENAI_CHAT_PATH)}`;
+const _PATH = _BASE.endsWith('/v1') && _PATH_RAW.startsWith('/v1/')
+  ? _PATH_RAW.replace(/^\/v1\/?/, '/')
+  : _PATH_RAW;
+const OPENAI_URL = `${_BASE}${_PATH}`;
+
+/**
+ * PUBLIC_INTERFACE
+ * getAiEndpointInfo
+ * Returns the resolved endpoint configuration used for OpenAI calls.
+ */
+export function getAiEndpointInfo() {
+  /** Returns the effective base URL, chat path, full URL, and default model being used. */
+  return {
+    baseUrl: _BASE,
+    chatPath: _PATH,
+    fullUrl: OPENAI_URL,
+    model: DEFAULT_MODEL
+  };
+}
 
 // Model: check multiple aliases
 const DEFAULT_MODEL =

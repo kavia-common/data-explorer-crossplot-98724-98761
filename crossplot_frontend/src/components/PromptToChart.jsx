@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { interpretPrompt, getAiApiKey, setAiApiKey } from '../services/aiInterpreter';
+import { interpretPrompt, getAiApiKey, setAiApiKey, getAiEndpointInfo } from '../services/aiInterpreter';
 
 /**
  * PromptToChart
@@ -29,9 +29,16 @@ export default function PromptToChart({
   const [showKeyInput, setShowKeyInput] = useState(false);
   // If LLM attempt fails with an auth error (e.g., 401), we surface a warning banner for the user.
   const [llmNotice, setLlmNotice] = useState('');
+  const [endpoint, setEndpoint] = useState(null);
 
   useEffect(() => {
     setKey(getAiApiKey() || '');
+    // Capture current AI endpoint info for debugging if needed
+    try {
+      setEndpoint(getAiEndpointInfo());
+    } catch {
+      // ignore
+    }
   }, []);
 
   const hasAI = useMemo(() => !!aiKey, [aiKey]);
@@ -160,10 +167,21 @@ export default function PromptToChart({
         </div>
       )}
 
-      {/* LLM Authorization warning (e.g., invalid API key) */}
+      {/* LLM connection/authorization warning (e.g., 404, 401, CORS) */}
       {llmNotice ? (
         <div className="ai-warning" role="alert">
-          Error de autorización de IA: {llmNotice}
+          <div><strong>Error de IA:</strong> {llmNotice}</div>
+          {endpoint ? (
+            <div style={{ marginTop: 6, fontSize: 12 }}>
+              Endpoint actual: <code>{endpoint.fullUrl}</code>
+              <br />
+              Verifica tus variables de entorno:
+              <ul style={{ margin: '6px 0 0 20px' }}>
+                <li><code>REACT_APP_AI_BASE</code> o <code>REACT_APP_REACT_APP_AI_BASE</code> (sin <code>/v1</code> al final si usas <code>REACT_APP_OPENAI_CHAT_PATH=/v1/chat/completions</code>).</li>
+                <li><code>REACT_APP_OPENAI_CHAT_PATH</code> (por defecto <code>/v1/chat/completions</code>).</li>
+              </ul>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
