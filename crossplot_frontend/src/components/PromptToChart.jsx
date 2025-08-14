@@ -7,6 +7,7 @@ import {
   getAiAuthInfo, 
   getEnvAiApiKey 
 } from '../services/aiInterpreter';
+import { isArithmeticExpression, validateExpression } from '../utils/expression';
 
 /**
  * PromptToChart
@@ -73,7 +74,11 @@ export default function PromptToChart({
   function validateResult(res) {
     const { x, y, color } = res || {};
     const validX = x && numericOptions.includes(x);
-    const validY = y && numericOptions.includes(y);
+    // Allow arithmetic expressions for Y if they only use known numeric variables
+    const validY = !!y && (
+      numericOptions.includes(y) ||
+      (isArithmeticExpression(y) && validateExpression(y, numericOptions).valid)
+    );
     const validC = color && categoricalOptions.includes(color);
     return { validX, validY, validC };
   }

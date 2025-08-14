@@ -127,7 +127,9 @@ function buildSystemPrompt(variables) {
     'You translate user chart intents into a strict JSON instruction for a scatter plot.',
     'Respond ONLY with a single JSON object and no prose.',
     'Pick variable names from the provided lists exactly as written.',
-    'Output keys: x (numeric), y (numeric), color (categorical), chart (always "scatter").',
+    'Output keys: x (numeric or an arithmetic expression of numeric variables), y (numeric or an arithmetic expression), color (categorical), chart (always "scatter").',
+    'Arithmetic expressions may use ONLY the provided numeric variables with +, -, *, / and parentheses. Example: "cum_oil_m3 / lateral_length_m".',
+    'Prefer putting derived/ratio expressions on the Y axis when requested (e.g., "y = A/B").',
     '',
     `Available numeric variables: ${numeric.join(', ') || '(none)'}`,
     `Available categorical variables: ${categorical.join(', ') || '(none)'}`,
@@ -136,6 +138,8 @@ function buildSystemPrompt(variables) {
     'Examples:',
     'User: "Plot income vs age, colored by region"',
     'Assistant: {"x":"age","y":"income","color":"region","chart":"scatter"}',
+    'User: "Graficar cum_oil_m3/lateral_length_m vs days, coloreado por basin"',
+    'Assistant: {"x":"days","y":"cum_oil_m3 / lateral_length_m","color":"basin","chart":"scatter"}',
     '',
     'If the request is impossible with given variables, choose the closest valid combination and reflect that in the choice.'
   ].join('\n');
@@ -205,9 +209,36 @@ function heuristicInterpretation(prompt, variables) {
     }
   }
 
+  // Simple arithmetic expression extractor (prioritize division)
+  function extractArithmeticExpression(t, numericVars) {
+    const matches = [];
+    const rx = /([a-zA-Z0-9_]+)\s*([*/+\-])\s*([a-zA-Z0-9_]+)/g;
+    let m;
+    while ((m = rx.exec(t)) !== null) {
+      const left = m[1];
+      const op = m[2];
+      const right = m[3];
+      if (numericsLower.includes(left.toLowerCase()) && numericsLower.includes(right.toLowerCase())) {
+        // normalize to exact case as in numericVars
+        const L = findExact(left, numericVars, numericsLower);
+        const R = findExact(right, numericVars, numericsLower);
+        matches.push({ expr: `${L} ${op} ${R}`, op });
+      }
+    }
+    // Prefer division, else the first found
+    const div = matches.find(m => m.op === '/');
+    return (div?.expr) || (matches[0]?.expr) || null;
+  }
+
   // Build initial guesses
   let x = mentionedNumerics[0] || numeric[0];
   let y = mentionedNumerics[1] || numeric[1] || numeric[0];
+
+  // If an arithmetic expression is present, prioritize it for Y
+  const arith = extractArithmeticExpression(text, numeric);
+  if (arith) {
+    y = arith;
+  }
 
   // Guess color by phrases: "color by", "colorear por", "según", "por"
   let color = mentionedCats[0] || categorical[0];
@@ -218,15 +249,26 @@ function heuristicInterpretation(prompt, variables) {
     const left = vsMatch[1];
     const right = vsMatch[3];
     if (numericsLower.includes(left.toLowerCase())) x = findExact(left, numeric, numericsLower);
-    if (numericsLower.includes(right.toLowerCase())) y = findExact(right, numeric, numericsLower);
+    if (!arith && numericsLower.includes(right.toLowerCase())) {
+      // only set y from vs if we didn't already set an arithmetic expression
+      y = findExact(right, numeric, numericsLower);
+    }
   }
 
   // Try phrases "on x", "on y"
   const onX = text.match(/en\s+el\s+eje\s+x\s+([a-zA-Z0-9_]+)/i) || text.match(/on\s+x\s+axis\s+([a-zA-Z0-9_]+)/i);
   if (onX && onX[1] && numericsLower.includes(onX[1].toLowerCase())) x = findExact(onX[1], numeric, numericsLower);
 
-  const onY = text.match(/en\s+el\s+eje\s+y\s+([a-zA-Z0-9_]+)/i) || text.match(/on\s+y\s+axis\s+([a-zA-Z0-9_]+)/i);
-  if (onY && onY[1] && numericsLower.includes(onY[1].toLowerCase())) y = findExact(onY[1], numeric, numericsLower);
+  const onY = text.match(/en\s+el\s+eje\s+y\s+([a-zA-Z0-9_\/\+\-\*\s]+)/i) || text.match(/on\s+y\s+axis\s+([a-zA-Z0-9_\/\+\-\*\s]+)/i);
+  if (onY && onY[1]) {
+    // If user explicitly specified Y, attempt to extract arithmetic expression there first
+    const maybeExpr = extractArithmeticExpression(onY[1], numeric);
+    if (maybeExpr) {
+      y = maybeExpr;
+    } else if (numericsLower.includes(onY[1].toLowerCase())) {
+      y = findExact(onY[1], numeric, numericsLower);
+    }
+  }
 
   // Try "color by X" or "colorear por X" or "color por X" or "según X" or "por X"
   const colorBy = text.match(/color(?:ed)?\s+by\s+([a-zA-Z0-9_]+)/i)
@@ -246,7 +288,9 @@ function heuristicInterpretation(prompt, variables) {
     if (!found) unknownVars.push(name);
   }
 
-  const explanation = 'Interpreted locally by keyword and variable name matching.';
+  const explanation = arith
+    ? 'Interpreted locally with priority for arithmetic expressions (y as derived metric).'
+    : 'Interpreted locally by keyword and variable name matching.';
   if (unknownVars.length > 0) {
     return {
       chart: 'scatter',

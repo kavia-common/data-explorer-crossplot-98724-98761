@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { getCategoryColorMap } from '../utils/colors';
 import { numericValue, uniqueValues, clamp, extent, niceTicks } from '../utils/data';
+import { isArithmeticExpression, evaluateExpressionOnRow } from '../utils/expression';
 
 /**
  * ScatterPlot renders a basic SVG scatter plot with axes. Points are colored by the chosen
@@ -27,8 +28,22 @@ export default function ScatterPlot({ data = [], xKey, yKey, cKey, width = 960, 
   const prepared = useMemo(() => {
     const rows = data
       .map((d) => {
-        const x = numericValue(d[xKey]);
-        const y = numericValue(d[yKey]);
+        // Resolve x
+        let x = NaN;
+        if (typeof xKey === 'string' && isArithmeticExpression(xKey)) {
+          x = evaluateExpressionOnRow(xKey, d, Object.keys(d));
+        } else {
+          x = numericValue(d[xKey]);
+        }
+
+        // Resolve y (supports arithmetic expressions like a/b)
+        let y = NaN;
+        if (typeof yKey === 'string' && isArithmeticExpression(yKey)) {
+          y = evaluateExpressionOnRow(yKey, d, Object.keys(d));
+        } else {
+          y = numericValue(d[yKey]);
+        }
+
         const c = d[cKey];
         return (Number.isFinite(x) && Number.isFinite(y)) ? { x, y, c } : null;
       })

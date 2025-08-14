@@ -1,4 +1,5 @@
 import React from 'react';
+import { isArithmeticExpression } from '../utils/expression';
 
 /**
  * VariableSelector renders dropdowns for X, Y (numeric) and Category (categorical) selections.
@@ -45,6 +46,10 @@ export default function VariableSelector({
           disabled={disabled || numericOptions.length < 1}
         >
           {numericOptions.length === 0 ? <option value="">No numeric variables</option> : null}
+          {/* If current yVar is an arithmetic expression and not in numeric options, show it explicitly */}
+          {yVar && !numericOptions.includes(yVar) && isArithmeticExpression(yVar) ? (
+            <option key="y-expr" value={yVar}>{yVar} (expr)</option>
+          ) : null}
           {numericOptions.map((opt) => (
             <option key={`y-${opt}`} value={opt}>{opt}</option>
           ))}

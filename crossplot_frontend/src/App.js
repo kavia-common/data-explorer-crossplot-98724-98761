@@ -7,6 +7,7 @@ import TokenGate from './components/TokenGate';
 import PromptToChart from './components/PromptToChart';
 import { fetchTableData } from './services/api';
 import { inferVariableTypes, normalizeTable } from './utils/data';
+import { isArithmeticExpression, validateExpression } from './utils/expression';
 
 /**
  * App shell that composes the layout, handles token gating, data fetching,
@@ -156,7 +157,9 @@ export default function App() {
             dateOptions={dateVars}
             onApply={({ x, y, color }) => {
               if (x && numericVars.includes(x)) setXVar(x);
-              if (y && numericVars.includes(y)) setYVar(y);
+              if (y && (numericVars.includes(y) || (isArithmeticExpression(y) && validateExpression(y, numericVars).valid))) {
+                setYVar(y);
+              }
               if (color && categoricalVars.includes(color)) setCVar(color);
             }}
             disabled={!rows.length || !hasEnoughVars}
