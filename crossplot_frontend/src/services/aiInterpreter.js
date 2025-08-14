@@ -415,6 +415,47 @@ async function callOpenAI(prompt, variables, apiKey, model) {
 /**
  * Return the AI API key from localStorage or environment variables.
  */
+/**
+ * PUBLIC_INTERFACE
+ * Return the effective API key and its source ('env', 'local', or 'none').
+ * Environment variables take precedence over local storage.
+ */
+export function getAiAuthInfo() {
+  const envKey = getEnvAiApiKey();
+  const localKey = getLocalAiApiKey();
+  
+  if (envKey && envKey.trim()) {
+    return { key: envKey.trim(), source: 'env' };
+  }
+  if (localKey && localKey.trim()) {
+    return { key: localKey.trim(), source: 'local' };
+  }
+  return { key: '', source: 'none' };
+}
+
+/**
+ * Helper to get API key only from environment variables
+ */
+export function getEnvAiApiKey() {
+  return (
+    process.env.REACT_APP_OPENAI_API_KEY ||
+    process.env.REACT_APP_REACT_APP_OPENAI_API_KEY ||
+    process.env.REACT_APP_AI_API_KEY ||
+    ''
+  );
+}
+
+/**
+ * Helper to get API key only from localStorage
+ */
+function getLocalAiApiKey() {
+  try {
+    return localStorage.getItem('aiApiKey') || '';
+  } catch {
+    return '';
+  }
+}
+
 // PUBLIC_INTERFACE
 export function getAiApiKey() {
   try {
@@ -488,9 +529,15 @@ function detectChartIntent(prompt) {
  *
  * Returns InterpretResult or an object with { unsupported: true, requestedChart, suggestion, error }
  */
-// PUBLIC_INTERFACE
+/**
+ * PUBLIC_INTERFACE
+ * Interpret a user's prompt into chart instructions with resilient OpenAI handling.
+ * Uses ENV key first, then localStorage. If local key fails with 401/unauthorized and an ENV key exists,
+ * it retries automatically with the ENV key before falling back to heuristic interpretation.
+ */
 export async function interpretPrompt({ prompt, variables, options = {} }) {
-  const apiKey = getAiApiKey();
+  const { key: effectiveKey, source: keySource } = getAiAuthInfo();
+  const envKeyOnly = getEnvAiApiKey();
   const preferLLM = options.preferLLM !== false; // default true
 
   // Pre-validate intent: currently only support scatter/crossplots
@@ -508,11 +555,35 @@ export async function interpretPrompt({ prompt, variables, options = {} }) {
     };
   }
 
-  if (preferLLM && apiKey) {
+  if (preferLLM && effectiveKey) {
     try {
-      const r = await callOpenAI(prompt, variables, apiKey, options.model);
+      const r = await callOpenAI(prompt, variables, effectiveKey, options.model);
+      // annotate meta without changing existing schema
+      r.keySource = keySource;
       return r;
     } catch (e) {
+      const msg = String(e?.message || '').toLowerCase();
+      const looksAuth = msg.includes('401') || msg.includes('no autorizada') || msg.includes('unauthorized') || msg.includes('invalid api key') || msg.includes('incorrect api key') || msg.includes('missing api key');
+
+      // If we used local key and it failed with auth error but an ENV key exists and is different, retry with ENV
+      const canRetryWithEnv = keySource === 'local' && envKeyOnly && envKeyOnly.trim() && envKeyOnly.trim() !== effectiveKey.trim();
+      if (looksAuth && canRetryWithEnv) {
+        try {
+          const r2 = await callOpenAI(prompt, variables, envKeyOnly.trim(), options.model);
+          r2.keySource = 'env';
+          r2.explanation = 'Interpreted by OpenAI using ENV key after local key failed (401).';
+          r2.attemptedLLM = true;
+          return r2;
+        } catch (e2) {
+          // fall through to heuristic with combined error context
+          const h2 = heuristicInterpretation(prompt, variables);
+          h2.explanation = `LLM failed (local key auth: ${e?.message || 'unknown'}; env retry: ${e2?.message || 'unknown'}). Fallback to heuristic.`;
+          h2.attemptedLLM = true;
+          h2.llmError = `local: ${e?.message || 'unknown'}; env: ${e2?.message || 'unknown'}`;
+          return h2;
+        }
+      }
+
       // Fall back to heuristic with the error noted
       const h = heuristicInterpretation(prompt, variables);
       h.explanation = `LLM failed (${e?.message || 'unknown'}). Fallback to heuristic.`;

@@ -1,5 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { interpretPrompt, getAiApiKey, setAiApiKey, getAiEndpointInfo } from '../services/aiInterpreter';
+import { 
+  interpretPrompt, 
+  getAiApiKey, 
+  setAiApiKey, 
+  getAiEndpointInfo, 
+  getAiAuthInfo, 
+  getEnvAiApiKey 
+} from '../services/aiInterpreter';
 
 /**
  * PromptToChart
@@ -26,13 +33,22 @@ export default function PromptToChart({
   const [prompt, setPrompt] = useState('');
   const [status, setStatus] = useState({ type: 'idle', message: '' });
   const [aiKey, setKey] = useState('');
+  const [aiKeySource, setAiKeySource] = useState('none'); // 'env' | 'local' | 'none'
   const [showKeyInput, setShowKeyInput] = useState(false);
   // If LLM attempt fails with an auth error (e.g., 401), we surface a warning banner for the user.
   const [llmNotice, setLlmNotice] = useState('');
   const [endpoint, setEndpoint] = useState(null);
 
   useEffect(() => {
-    setKey(getAiApiKey() || '');
+    // Read effective auth info (ENV has precedence over local)
+    try {
+      const auth = getAiAuthInfo();
+      setKey(auth?.key || '');
+      setAiKeySource(auth?.source || 'none');
+    } catch {
+      setKey(getAiApiKey() || '');
+      setAiKeySource('local');
+    }
     // Capture current AI endpoint info for debugging if needed
     try {
       setEndpoint(getAiEndpointInfo());
@@ -123,12 +139,36 @@ export default function PromptToChart({
     }
   }
 
+  function maskKey(k) {
+    const s = String(k || '');
+    if (!s) return '';
+    return '••••' + s.slice(-4);
+  }
+
   function handleSaveKey() {
     setAiApiKey(aiKey);
     setStatus({
       type: 'success',
       message: 'Clave de IA guardada localmente (navegador).'
     });
+    // After saving locally, source becomes 'local' unless env is set and takes precedence
+    const envKey = getEnvAiApiKey();
+    if (envKey && envKey.trim()) {
+      setAiKeySource('env'); // env still takes precedence
+      setKey(envKey.trim());
+    } else {
+      setAiKeySource('local');
+    }
+  }
+
+  function handleClearLocalKey() {
+    // Remove browser key to ensure ENV is used if set
+    setAiApiKey('');
+    const envKey = getEnvAiApiKey();
+    const useEnv = envKey && envKey.trim();
+    setKey(useEnv ? envKey.trim() : '');
+    setAiKeySource(useEnv ? 'env' : 'none');
+    setStatus({ type: 'success', message: useEnv ? 'Clave local eliminada. Usando clave de entorno.' : 'Clave local eliminada.' });
   }
 
   return (
@@ -163,7 +203,14 @@ export default function PromptToChart({
         </div>
       ) : (
         <div className="ai-ok" role="note">
-          IA habilitada con clave en este navegador.
+          IA habilitada. Fuente clave: <strong>{aiKeySource}</strong>{aiKey ? ` (${maskKey(aiKey)})` : ''}.
+          {aiKeySource === 'local' ? (
+            <div className="ai-key-row">
+              <button type="button" className="btn" onClick={handleClearLocalKey}>
+                Quitar clave local (usar .env si existe)
+              </button>
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -180,6 +227,12 @@ export default function PromptToChart({
                 <li><code>REACT_APP_AI_BASE</code> o <code>REACT_APP_REACT_APP_AI_BASE</code> (puede ser solo base, p. ej. <code>https://api.openai.com</code>, o el endpoint completo, p. ej. <code>https://api.openai.com/v1/chat/completions</code>).</li>
                 <li><code>REACT_APP_OPENAI_CHAT_PATH</code> (por defecto <code>/v1/chat/completions</code>; si <code>REACT_APP_AI_BASE</code> ya incluye el endpoint completo, puedes dejarla vacía). La app evita concatenar segmentos duplicados automáticamente.</li>
               </ul>
+              {String(llmNotice).toLowerCase().includes('401') || String(llmNotice).toLowerCase().includes('no autorizada') ? (
+                <div style={{ marginTop: 6 }}>
+                  Sugerencia: si ya configuraste una nueva clave en .env y ves este error,
+                  {aiKeySource === 'local' ? ' elimina la clave local para usar la del entorno.' : ' asegúrate de que la variable de entorno esté bien definida y el build haya tomado los cambios.'}
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>
