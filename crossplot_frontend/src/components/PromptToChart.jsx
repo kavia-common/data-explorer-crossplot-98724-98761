@@ -41,7 +41,7 @@ export default function PromptToChart({
     if (numericOptions.length < 2 || categoricalOptions.length < 1) {
       return 'Se necesitan al menos dos numéricas y una categórica para graficar.';
     }
-    return 'Escribe instrucciones como "Graficar precio vs cantidad, coloreado por categoría".';
+    return 'Nota: actualmente solo se soportan crossplots (scatterplots). Ejemplo: "Graficar precio vs cantidad, coloreado por categoría".';
   }, [numericOptions, categoricalOptions]);
 
   function validateResult(res) {
@@ -63,6 +63,25 @@ export default function PromptToChart({
         date: dateOptions
       };
       const res = await interpretPrompt({ prompt, variables, options: { preferLLM: true } });
+
+      // 1) Unsupported chart type handling
+      if (res?.unsupported || (res?.chart && res.chart !== 'scatter')) {
+        const msg = [
+          res?.error || 'Tipo de gráfico no soportado.',
+          res?.suggestion || 'Actualmente solo se soportan crossplots (scatterplots).',
+          'Ejemplos: "Precio vs Cantidad, coloreado por Categoría".'
+        ].filter(Boolean).join(' ');
+        setStatus({ type: 'error', message: msg });
+        return;
+      }
+
+      // 2) Unknown variable error bubbled from interpreter
+      if (res?.error && !res?.x && !res?.y) {
+        setStatus({ type: 'error', message: res.error });
+        return;
+      }
+
+      // 3) Standard validation for x, y, color
       const { validX, validY, validC } = validateResult(res);
 
       if (validX && validY && validC) {
@@ -77,9 +96,10 @@ export default function PromptToChart({
           !validY ? `y inválido (${res?.y || 'n/a'})` : null,
           !validC ? `color inválido (${res?.color || 'n/a'})` : null
         ].filter(Boolean).join(', ');
+        const extra = res?.explanation ? ` ${res.explanation}` : '';
         setStatus({
           type: 'error',
-          message: `No se pudo aplicar: ${missing}. Asegúrate de pedir dos numéricas y una categórica válidas.`
+          message: `No se pudo aplicar: ${missing}. Asegúrate de pedir dos numéricas y una categórica válidas.${extra}`
         });
       }
     } catch (e) {
