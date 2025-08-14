@@ -42,17 +42,53 @@ const OPENAI_CHAT_PATH =
   ENV.REACT_APP_OPENAI_CHAT_PATH ||
   '/v1/chat/completions';
 
-// Full URL composed safely with/without slashes
 /**
  * Compose the effective URL safely, avoiding common pitfalls:
- * - If base already ends with "/v1" and path starts with "/v1/...", strip the duplicate.
+ * - If base already ends with the same path, do not append the path again.
+ * - If base already includes the full OpenAI chat path, return base as-is.
+ * - If base ends with "/v1" and path starts with "/v1/...", strip the duplicate.
+ * - Supports base-only (https://api.openai.com) and full-endpoint base (https://api.openai.com/v1/chat/completions).
  */
-const _BASE = String(OPENAI_BASE_URL).replace(/\/+$/, '');
-const _PATH_RAW = String(OPENAI_CHAT_PATH).startsWith('/') ? String(OPENAI_CHAT_PATH) : `/${String(OPENAI_CHAT_PATH)}`;
-const _PATH = _BASE.endsWith('/v1') && _PATH_RAW.startsWith('/v1/')
-  ? _PATH_RAW.replace(/^\/v1\/?/, '/')
-  : _PATH_RAW;
-const OPENAI_URL = `${_BASE}${_PATH}`;
+function joinOpenAIEndpoint(base, path) {
+  const b = String(base || '').trim().replace(/\/+$/, ''); // trim trailing slashes
+  const pRaw = String(path || '').trim();
+
+  // No path configured: treat base as final endpoint (fallback to official if empty)
+  if (!pRaw) return b || 'https://api.openai.com';
+
+  const p = pRaw.startsWith('/') ? pRaw : `/${pRaw}`;
+  const bLower = b.toLowerCase();
+  const pLower = p.toLowerCase();
+
+  // If base already ends with the full path, return base
+  if (bLower.endsWith(pLower)) return b;
+
+  // If base already ends with known chat path segments, avoid appending again
+  if (bLower.endsWith('/v1/chat/completions') || bLower.endsWith('/chat/completions')) return b;
+
+  // If base ends with '/v1' and path starts with '/v1/...', strip leading '/v1' from path
+  let pFinal = p;
+  if (bLower.endsWith('/v1') && pLower.startsWith('/v1/')) {
+    pFinal = p.replace(/^\/v1(\/|$)/i, '/');
+  }
+
+  return `${b}${pFinal}`;
+}
+
+// Normalize base and path for info/debug and URL composition
+const _BASE = String(OPENAI_BASE_URL || '').replace(/\/+$/, '');
+const _PATH_NORMALIZED = (() => {
+  const raw = String(OPENAI_CHAT_PATH || '').trim();
+  if (!raw) return '';
+  const s = raw.startsWith('/') ? raw : `/${raw}`;
+  if (_BASE.toLowerCase().endsWith('/v1') && s.toLowerCase().startsWith('/v1/')) {
+    return s.replace(/^\/v1(\/|$)/i, '/');
+  }
+  return s;
+})();
+
+// Final URL used for OpenAI requests
+const OPENAI_URL = joinOpenAIEndpoint(_BASE, OPENAI_CHAT_PATH);
 
 /**
  * PUBLIC_INTERFACE
@@ -60,10 +96,10 @@ const OPENAI_URL = `${_BASE}${_PATH}`;
  * Returns the resolved endpoint configuration used for OpenAI calls.
  */
 export function getAiEndpointInfo() {
-  /** Returns the effective base URL, chat path, full URL, and default model being used. */
+  /** Returns the effective base URL, chat path (normalized), full URL, and default model being used. */
   return {
     baseUrl: _BASE,
-    chatPath: _PATH,
+    chatPath: _PATH_NORMALIZED,
     fullUrl: OPENAI_URL,
     model: DEFAULT_MODEL
   };

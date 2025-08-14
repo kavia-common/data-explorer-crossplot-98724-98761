@@ -177,8 +177,8 @@ export default function PromptToChart({
               <br />
               Verifica tus variables de entorno:
               <ul style={{ margin: '6px 0 0 20px' }}>
-                <li><code>REACT_APP_AI_BASE</code> o <code>REACT_APP_REACT_APP_AI_BASE</code> (sin <code>/v1</code> al final si usas <code>REACT_APP_OPENAI_CHAT_PATH=/v1/chat/completions</code>).</li>
-                <li><code>REACT_APP_OPENAI_CHAT_PATH</code> (por defecto <code>/v1/chat/completions</code>).</li>
+                <li><code>REACT_APP_AI_BASE</code> o <code>REACT_APP_REACT_APP_AI_BASE</code> (puede ser solo base, p. ej. <code>https://api.openai.com</code>, o el endpoint completo, p. ej. <code>https://api.openai.com/v1/chat/completions</code>).</li>
+                <li><code>REACT_APP_OPENAI_CHAT_PATH</code> (por defecto <code>/v1/chat/completions</code>; si <code>REACT_APP_AI_BASE</code> ya incluye el endpoint completo, puedes dejarla vacía). La app evita concatenar segmentos duplicados automáticamente.</li>
               </ul>
             </div>
           ) : null}
